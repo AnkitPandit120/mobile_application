@@ -18,6 +18,7 @@ export default function IndividualChat({ route }) {
   const headerHeight = useHeaderHeight();
   const [messages, setMessages] = useState(chat.messages ?? []);
   const [text, setText] = useState("");
+  const [historyState, setHistoryState] = useState(chatServerUrl ? "loading" : "ready");
 
   useEffect(() => {
     if (!chatServerUrl) return;
@@ -30,13 +31,16 @@ export default function IndividualChat({ route }) {
       })
       .then((result) => {
         if (!controller.signal.aborted) {
+          setHistoryState("ready");
           setMessages((current) => {
             const known = new Set(result.messages.map((message) => message.id));
             return [...result.messages, ...current.filter((message) => !known.has(message.id))];
           });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setHistoryState("failed");
+      });
     return () => controller.abort();
   }, [chat.id]);
 
@@ -44,16 +48,16 @@ export default function IndividualChat({ route }) {
   const typingTimer = useRef(null);
   const lastTypingSent = useRef(0);
   const [typing, setTyping] = useState(false);
-  const [connected, setConnected] = useState(false);
+  const [connection, setConnection] = useState("connecting");
 
   useEffect(() => {
     if (!chatServerUrl) return;
 
     const socket = new WebSocket(chatServerUrl.replace(/^http/, "ws") + "/ws");
     socketRef.current = socket;
-    socket.onopen = () => setConnected(true);
-    socket.onclose = () => setConnected(false);
-    socket.onerror = () => setConnected(false);
+    socket.onopen = () => setConnection("connected");
+    socket.onclose = () => setConnection("disconnected");
+    socket.onerror = () => setConnection("disconnected");
     socket.onmessage = ({ data }) => {
       let event;
       try {
@@ -134,6 +138,16 @@ export default function IndividualChat({ route }) {
         <Text style={styles.title}>{chat.name}</Text>
       </View>
 
+      {chatServerUrl && connection !== "connected" && (
+        <Text accessibilityLiveRegion="polite" style={styles.status}>
+          {connection === "connecting" ? "Connecting to chat server…" : "Chat server disconnected"}
+        </Text>
+      )}
+      {historyState !== "ready" && (
+        <Text accessibilityLiveRegion="polite" style={styles.status}>
+          {historyState === "loading" ? "Loading messages…" : "Could not load message history"}
+        </Text>
+      )}
       <FlatList
         data={messages}
         keyExtractor={(item) => String(item.id)}
@@ -163,7 +177,7 @@ export default function IndividualChat({ route }) {
           onSubmitEditing={sendMessage}
           returnKeyType="send"
         />
-        <Button title="Send" onPress={sendMessage} disabled={!text.trim() || Boolean(chatServerUrl && !connected)} />
+        <Button title="Send" onPress={sendMessage} disabled={!text.trim() || Boolean(chatServerUrl && connection !== "connected")} />
       </View>
     </KeyboardAvoidingView>
   );
@@ -219,6 +233,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
   },
+  status: { padding: 12, color: "#46535f" },
   list: {
     padding: 12,
   },

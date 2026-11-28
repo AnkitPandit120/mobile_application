@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 
 const ChatList = ({ navigation }) => {
   const [chats, setChats] = useState(initialChats);
+  const [loadState, setLoadState] = useState(chatServerUrl ? "loading" : "ready");
+
   useEffect(() => {
     if (!chatServerUrl) return;
 
@@ -18,9 +20,12 @@ const ChatList = ({ navigation }) => {
       .then((result) => {
         if (!controller.signal.aborted) {
           setChats(result.map((chat) => ({ ...chat, messages: chat.messages ?? [] })));
+          setLoadState("ready");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setLoadState("offline");
+      });
     return () => controller.abort();
   }, []);
 
@@ -37,6 +42,11 @@ const ChatList = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Chats</Text>
+      {loadState !== "ready" && (
+        <Text accessibilityLiveRegion="polite" style={styles.status}>
+          {loadState === "loading" ? "Loading conversations…" : "Server unavailable. Showing sample chats."}
+        </Text>
+      )}
       <FlatList
         windowSize={4}
         data={chats}
@@ -62,6 +72,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  status: { paddingHorizontal: 20, paddingBottom: 12, color: "#46535f" },
   heading: {
     fontSize: 28,
     fontWeight: "bold",
