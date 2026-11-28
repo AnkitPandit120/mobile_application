@@ -24,6 +24,16 @@ const ChatList = ({ navigation }) => {
     return () => controller.abort();
   }, []);
 
+  const openChat = (chat) => {
+    setChats((current) =>
+      current.map((item) => (item.id === chat.id ? { ...item, unreadCount: 0 } : item)),
+    );
+    if (chatServerUrl) {
+      fetch(`${chatServerUrl}/chats/${chat.id}/read`, { method: "POST" }).catch(() => {});
+    }
+    navigation.navigate("Single Chat", { chat });
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Chats</Text>
@@ -32,7 +42,7 @@ const ChatList = ({ navigation }) => {
         data={chats}
         renderItem={({ item }) => {
           return (
-            <Pressable onPress={() => navigation.navigate("Single Chat", {chat: item})}>
+            <Pressable onPress={() => openChat(item)}>
               <ChatItem chat={item} />
             </Pressable>
           );
