@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -11,11 +11,34 @@ import {
 } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 
+import { chatServerUrl } from "../chatServer";
+
 export default function IndividualChat({ route }) {
   const chat = route.params.chat;
   const headerHeight = useHeaderHeight();
-  const [messages, setMessages] = useState(chat.messages);
+  const [messages, setMessages] = useState(chat.messages ?? []);
   const [text, setText] = useState("");
+
+  useEffect(() => {
+    if (!chatServerUrl) return;
+
+    const controller = new AbortController();
+    fetch(`${chatServerUrl}/chats/${chat.id}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load messages");
+        return response.json();
+      })
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setMessages((current) => {
+            const known = new Set(result.messages.map((message) => message.id));
+            return [...result.messages, ...current.filter((message) => !known.has(message.id))];
+          });
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [chat.id]);
 
   const sendMessage = async () => {
     const trimmed = text.trim();
