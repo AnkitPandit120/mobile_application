@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -40,9 +40,50 @@ export default function IndividualChat({ route }) {
     return () => controller.abort();
   }, [chat.id]);
 
-  const sendMessage = async () => {
+  const socketRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (!chatServerUrl) return;
+
+    const socket = new WebSocket(chatServerUrl.replace(/^http/, "ws") + "/ws");
+    socketRef.current = socket;
+    socket.onopen = () => setConnected(true);
+    socket.onclose = () => setConnected(false);
+    socket.onerror = () => setConnected(false);
+    socket.onmessage = ({ data }) => {
+      let event;
+      try {
+        event = JSON.parse(data);
+      } catch {
+        return;
+      }
+      if (String(event.chatId) !== String(chat.id) || event.type !== "message") return;
+      setMessages((current) =>
+        current.some((message) => message.id === event.message.id)
+          ? current
+          : [...current, event.message],
+      );
+    };
+
+    return () => {
+      socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
+      socketRef.current = null;
+      socket.close();
+    };
+  }, [chat.id]);
+
+  const sendMessage = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    if (chatServerUrl) {
+      const socket = socketRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: "send", chatId: chat.id, text: trimmed }));
+      setText("");
+      return;
+    }
 
     const newMessage = {
       id: Date.now(),
@@ -54,16 +95,8 @@ export default function IndividualChat({ route }) {
       }),
     };
 
-    // Show the message right away, then send it to the backend
     setMessages((prev) => [...prev, newMessage]);
     setText("");
-
-    // TODO: replace with your backend call, e.g.
-    // await fetch("https://your-backend.com/messages", {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({ chatId: chat.id, ...newMessage }),
-    // });
   };
 
   return (
@@ -107,7 +140,7 @@ export default function IndividualChat({ route }) {
           onSubmitEditing={sendMessage}
           returnKeyType="send"
         />
-        <Button title="Send" onPress={sendMessage} disabled={!text.trim()} />
+        <Button title="Send" onPress={sendMessage} disabled={!text.trim() || Boolean(chatServerUrl && !connected)} />
       </View>
     </KeyboardAvoidingView>
   );
