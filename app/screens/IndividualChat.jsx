@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AppState,
   View,
   Text,
   FlatList,
@@ -53,39 +54,78 @@ export default function IndividualChat({ route }) {
   useEffect(() => {
     if (!chatServerUrl) return;
 
-    const socket = new WebSocket(chatServerUrl.replace(/^http/, "ws") + "/ws");
-    socketRef.current = socket;
-    socket.onopen = () => setConnection("connected");
-    socket.onclose = () => setConnection("disconnected");
-    socket.onerror = () => setConnection("disconnected");
-    socket.onmessage = ({ data }) => {
-      let event;
-      try {
-        event = JSON.parse(data);
-      } catch {
-        return;
-      }
-      if (String(event.chatId) !== String(chat.id)) return;
-      if (event.type === "typing" && event.from !== "me") {
-        setTyping(true);
+    let retryTimer;
+    let retryDelay = 1000;
+
+    function releaseSocket() {
+      const socket = socketRef.current;
+      if (!socket) return;
+      socketRef.current = null;
+      socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
+      socket.close();
+    }
+
+    function connect() {
+      if (AppState.currentState === "background" || AppState.currentState === "inactive") return;
+      setConnection("connecting");
+      const socket = new WebSocket(chatServerUrl.replace(/^http/, "ws") + "/ws");
+      socketRef.current = socket;
+      socket.onopen = () => {
+        retryDelay = 1000;
+        setConnection("connected");
+      };
+      const retry = () => {
+        releaseSocket();
         clearTimeout(typingTimer.current);
-        typingTimer.current = setTimeout(() => setTyping(false), 2500);
+        setTyping(false);
+        setConnection("disconnected");
+        retryTimer = setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 15000);
+      };
+      socket.onclose = retry;
+      socket.onerror = retry;
+      socket.onmessage = ({ data }) => {
+        let event;
+        try {
+          event = JSON.parse(data);
+        } catch {
+          return;
+        }
+        if (String(event.chatId) !== String(chat.id)) return;
+        if (event.type === "typing" && event.from !== "me") {
+          setTyping(true);
+          clearTimeout(typingTimer.current);
+          typingTimer.current = setTimeout(() => setTyping(false), 2500);
+          return;
+        }
+        if (event.type !== "message") return;
+        if (event.message.sender !== "me") setTyping(false);
+        setMessages((current) =>
+          current.some((message) => message.id === event.message.id)
+            ? current
+            : [...current, event.message],
+        );
+      };
+    }
+
+    connect();
+    const subscription = AppState.addEventListener("change", (state) => {
+      clearTimeout(retryTimer);
+      if (state === "active") {
+        if (!socketRef.current) connect();
         return;
       }
-      if (event.type !== "message") return;
-      if (event.message.sender !== "me") setTyping(false);
-      setMessages((current) =>
-        current.some((message) => message.id === event.message.id)
-          ? current
-          : [...current, event.message],
-      );
-    };
+      releaseSocket();
+      clearTimeout(typingTimer.current);
+      setTyping(false);
+      setConnection("disconnected");
+    });
 
     return () => {
-      socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
-      socketRef.current = null;
+      subscription.remove();
+      clearTimeout(retryTimer);
       clearTimeout(typingTimer.current);
-      socket.close();
+      releaseSocket();
     };
   }, [chat.id]);
 
