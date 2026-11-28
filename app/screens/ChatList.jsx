@@ -1,10 +1,29 @@
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import ChatItem from "../components/ChatItem";
-import initalChat from "../data/chats.json";
-import { useState } from "react";
+import initialChats from "../data/chats.json";
+import { chatServerUrl } from "../chatServer";
+import { useEffect, useState } from "react";
 
 const ChatList = ({ navigation }) => {
-  const [chats, setChats] = useState(initalChat);
+  const [chats, setChats] = useState(initialChats);
+  useEffect(() => {
+    if (!chatServerUrl) return;
+
+    const controller = new AbortController();
+    fetch(`${chatServerUrl}/chats`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load chats");
+        return response.json();
+      })
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setChats(result.map((chat) => ({ ...chat, messages: chat.messages ?? [] })));
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>Chats</Text>
@@ -18,7 +37,7 @@ const ChatList = ({ navigation }) => {
             </Pressable>
           );
         }}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => String(item.id)}
       />
     </View>
 
