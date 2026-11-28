@@ -41,6 +41,9 @@ export default function IndividualChat({ route }) {
   }, [chat.id]);
 
   const socketRef = useRef(null);
+  const typingTimer = useRef(null);
+  const lastTypingSent = useRef(0);
+  const [typing, setTyping] = useState(false);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -58,7 +61,15 @@ export default function IndividualChat({ route }) {
       } catch {
         return;
       }
-      if (String(event.chatId) !== String(chat.id) || event.type !== "message") return;
+      if (String(event.chatId) !== String(chat.id)) return;
+      if (event.type === "typing" && event.from !== "me") {
+        setTyping(true);
+        clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => setTyping(false), 2500);
+        return;
+      }
+      if (event.type !== "message") return;
+      if (event.message.sender !== "me") setTyping(false);
       setMessages((current) =>
         current.some((message) => message.id === event.message.id)
           ? current
@@ -69,9 +80,20 @@ export default function IndividualChat({ route }) {
     return () => {
       socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
       socketRef.current = null;
+      clearTimeout(typingTimer.current);
       socket.close();
     };
   }, [chat.id]);
+
+  const updateDraft = (value) => {
+    setText(value);
+    const socket = socketRef.current;
+    const now = Date.now();
+    if (!value.trim() || socket?.readyState !== WebSocket.OPEN || now - lastTypingSent.current < 1500) return;
+
+    lastTypingSent.current = now;
+    socket.send(JSON.stringify({ type: "typing", chatId: chat.id }));
+  };
 
   const sendMessage = () => {
     const trimmed = text.trim();
@@ -131,12 +153,13 @@ export default function IndividualChat({ route }) {
         }}
       />
 
+      {typing && <Text style={styles.list}>{chat.name} is typing…</Text>}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
           placeholder="Type a message"
           value={text}
-          onChangeText={setText}
+          onChangeText={updateDraft}
           onSubmitEditing={sendMessage}
           returnKeyType="send"
         />
